@@ -1,0 +1,65 @@
+services:
+  base:                              # se construye 1 vez; no se ejecuta
+    build:
+      context: .
+      dockerfile: Dockerfile.base    # crea mybase:latest con los requirements comunes
+    image: mybase:latest
+
+  lstm:
+    build:
+      context: ./LSTM                # su Dockerfile debe empezar con: FROM mybase:latest
+      dockerfile: Dockerfile
+    container_name: lstm
+    depends_on: [base]
+    environment:
+      MODEL_DIR: /models
+    volumes:
+      - ./LSTM/trained_models:/models:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  tracking_system:
+    build:
+      context: ./Tracking_system     # su Dockerfile debe empezar con: FROM mybase:latest
+      dockerfile: Dockerfile
+    container_name: tracking_system
+    depends_on:
+      lstm:
+        condition: service_healthy
+      base:
+        condition: service_started
+      jumping_score:
+        condition: service_healthy
+    environment:
+      DATA_DIR: /data
+      SCRIPTS_DIR: /scripts
+      MODEL_URL: http://lstm:8000
+      JUMPING_SCORE_URL: http://jumping_score:9000
+    volumes:
+      - ./Tracking_system/csv:/data:rw
+      - ./Tracking_system/scripts:/scripts:rw
+
+  jumping_score:
+    build:
+      context: ./jumping_score                # su Dockerfile debe empezar con: FROM mybase:latest
+      dockerfile: Dockerfile
+    container_name: jumping_score
+    depends_on: [base]
+    environment:
+      SCRIPTS_DIR: /scripts
+      DATA_DIR: /data
+    volumes:
+      - ./jumping_score/scripts:/scripts:ro
+      - ./Tracking_system/csv:/data:ro
+    ports:
+      - "7000:9000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
